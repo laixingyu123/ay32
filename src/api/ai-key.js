@@ -372,7 +372,10 @@ export async function updateKeyInfo(options) {
 		}
 
 		// 验证 key_type 枚举值（如果提供）
-		if (updateData.key_type !== undefined && !['coderouter', 'anyrouter', 'other'].includes(updateData.key_type)) {
+		if (
+			updateData.key_type !== undefined &&
+			!['coderouter', 'anyrouter', 'other'].includes(updateData.key_type)
+		) {
 			return {
 				success: false,
 				error: 'Key类型必须为 coderouter、anyrouter 或 other',
@@ -382,7 +385,10 @@ export async function updateKeyInfo(options) {
 		// 验证数字字段为非负数
 		const numericFields = ['quota', 'remain_quota', 'used_quota'];
 		for (const field of numericFields) {
-			if (updateData[field] !== undefined && (typeof updateData[field] !== 'number' || updateData[field] < 0)) {
+			if (
+				updateData[field] !== undefined &&
+				(typeof updateData[field] !== 'number' || updateData[field] < 0)
+			) {
 				return {
 					success: false,
 					error: `${field} 必须为非负数`,
