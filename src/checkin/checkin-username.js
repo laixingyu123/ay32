@@ -10,7 +10,7 @@ import {
 	getIgnoreDefaultArgs,
 } from '../utils/playwright-stealth.js';
 import { fileURLToPath } from 'url';
-import { addKeys, updateKeyInfo } from '../api/index.js';
+import { addKeys, updateKeyInfo, updateAccountInfo } from '../api/index.js';
 
 class AnyRouterSignIn {
 	constructor() {
@@ -387,6 +387,18 @@ class AnyRouterSignIn {
 
 			if (!loginResult.data.success) {
 				console.log(`[错误] 登录失败: ${loginResult.data.message || '未知原因'}`);
+
+				// 登录失败且提示被封禁时，更新账号封禁状态
+				if (accountInfo?._id && loginResult.data.message?.includes('用户已被封禁')) {
+					console.log(`[封禁] 检测到账号可能被封禁，更新 is_banned 状态...`);
+					const banResult = await updateAccountInfo(accountInfo._id, { is_banned: true });
+					if (banResult.success) {
+						console.log('[封禁] 账号已标记为封禁');
+					} else {
+						console.log(`[封禁] 更新封禁状态失败: ${banResult.error}`);
+					}
+				}
+
 				return null;
 			}
 
@@ -663,7 +675,7 @@ class AnyRouterSignIn {
 											});
 
 											if (keyUpdateResult.success) {
-												console.log(`[令牌管理] 服务端 Key 信息同步成功`);
+												console.log('[令牌管理] 服务端 Key 信息同步成功');
 											} else {
 												console.log(`[令牌管理] 服务端 Key 信息同步失败: ${keyUpdateResult.error}`);
 											}
@@ -735,9 +747,7 @@ class AnyRouterSignIn {
 									: `[令牌管理] 出售令牌 ${configToken.name}`;
 
 								if (newUsedQuota !== oldUsedQuota) {
-									console.log(
-										`${logPrefix} 已使用额度变化: ${oldUsedQuota} -> ${newUsedQuota}`
-									);
+									console.log(`${logPrefix} 已使用额度变化: ${oldUsedQuota} -> ${newUsedQuota}`);
 								} else {
 									console.log(`${logPrefix} 强制更新额度信息`);
 								}

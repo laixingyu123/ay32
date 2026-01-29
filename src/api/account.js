@@ -7,14 +7,34 @@ import apiClient, { handleApiResponse } from './client.js';
 /**
  * 添加官方账号
  * @description 添加一个新的官方账号，可以用于出售。支持三种登录类型：账号密码登录、LinuxDo登录、GitHub登录
+ *
+ * 功能特性：
+ * 1. 自动关联到官方用户（official_user_001）
+ * 2. 自动随机分配官方类型的工作流地址
+ * 3. 默认设置为可出售状态（can_sell=true）
+ * 4. 支持可选字段：session、session_expire_time、checkin_date、balance、used
  * @param {Object} accountData - 账号数据
  * @param {string} accountData.username - 账号名称，根据account_type不同含义不同：0-AnyRouter账号名，1-LinuxDo账号名，2-GitHub账号名
  * @param {string} accountData.password - 账号密码，根据account_type不同含义不同：0-AnyRouter密码，1-LinuxDo密码，2-GitHub密码
  * @param {number} [accountData.account_type=0] - 账号类型（可选，默认0）：0-账号密码登录，1-LinuxDo登录，2-GitHub登录
+ * @param {string} [accountData.session=''] - Session会话标识（可选，默认为空字符串）
+ * @param {number} [accountData.session_expire_time=0] - Session过期时间戳（可选，默认为0）
+ * @param {number} [accountData.checkin_date=0] - 签到时间戳（可选，默认为0）
+ * @param {number} [accountData.balance=0] - AnyRouter余额（可选，默认为0）
+ * @param {number} [accountData.used=0] - 已使用额度（可选，默认为0）
  * @returns {Promise<{success: boolean, data?: {account_id: string, username: string, account_type: number}, error?: string}>}
  */
 export async function addOfficialAccount(accountData) {
-	const { username, password, account_type = 0 } = accountData;
+	const {
+		username,
+		password,
+		account_type = 0,
+		session = '',
+		session_expire_time = 0,
+		checkin_date = 0,
+		balance = 0,
+		used = 0,
+	} = accountData;
 
 	// 验证必需字段
 	if (!username || !password) {
@@ -32,11 +52,32 @@ export async function addOfficialAccount(accountData) {
 		};
 	}
 
+	// 验证余额必须为非负数
+	if (typeof balance !== 'number' || balance < 0) {
+		return {
+			success: false,
+			error: '余额必须为非负数',
+		};
+	}
+
+	// 验证已使用额度必须为非负数
+	if (typeof used !== 'number' || used < 0) {
+		return {
+			success: false,
+			error: '已使用额度必须为非负数',
+		};
+	}
+
 	return handleApiResponse(
 		apiClient.post('/lyanyrouter/addOfficialAccount', {
 			username,
 			password,
 			account_type,
+			session,
+			session_expire_time,
+			checkin_date,
+			balance,
+			used,
 		})
 	);
 }
@@ -52,7 +93,7 @@ export async function addOfficialAccount(accountData) {
  * 1. 自动验证用户是否存在
  * 2. 检查用户账号数量是否达到上限
  * 3. 自动设置签到模式（AnyRouter账号强制为1，其他类型可自定义）
- * 4. 支持可选字段：session、session_expire_time、aff_code、account_id、balance、used、notes
+ * 4. 支持可选字段：session、session_expire_time、aff_code、account_id、balance、used、checkin_date、notes
  * 5. 自动创建时间戳和初始化字段
  * @param {Object} accountData - 账号数据
  * @param {string} accountData.user_id - AnyRouter用户ID（关联anyrouter-users表的_id）
@@ -66,6 +107,7 @@ export async function addOfficialAccount(accountData) {
  * @param {string} [accountData.account_id=''] - AnyRouter平台账号ID（可选，默认为空字符串）
  * @param {number} [accountData.balance=0] - AnyRouter余额，单位为$（可选，默认为0）
  * @param {number} [accountData.used=0] - AnyRouter账号已使用的额度，单位为$（可选，默认为0）
+ * @param {number} [accountData.checkin_date=0] - 签到时间戳（可选，默认为0）
  * @param {string} [accountData.notes=''] - 备注信息（可选，默认为空字符串）
  * @returns {Promise<{success: boolean, data?: {_id: string, user_id: string, username: string, account_type: number, checkin_mode: number, create_date: number}, error?: string}>}
  */
@@ -82,6 +124,7 @@ export async function addAccount(accountData) {
 		account_id = '',
 		balance = 0,
 		used = 0,
+		checkin_date = 0,
 		notes = '',
 	} = accountData;
 
@@ -137,6 +180,7 @@ export async function addAccount(accountData) {
 		account_id,
 		balance,
 		used,
+		checkin_date,
 		notes,
 	};
 
@@ -151,29 +195,38 @@ export async function addAccount(accountData) {
 /**
  * 更新账号信息
  * @description 更新指定账号的信息，支持部分字段更新
+ *
+ * **特殊处理**：
+ * - `event_backup` 字段会与现有数据**合并**，而非覆盖。新字段会添加，同名字段会被新值覆盖，旧的其他字段会保留
+ * - `create_date` 字段不允许更新
+ * - 更新时会自动设置 `update_date` 为当前时间戳
+ *
  * @param {string} _id - 账号记录ID
  * @param {Object} updateData - 要更新的数据
  * @param {string} [updateData.anyrouter_user_id] - 关联的AnyRouter用户ID，拥有这个账号的人（内部）
  * @param {string} [updateData.username] - 账号名称，根据account_type不同含义不同
  * @param {string} [updateData.password] - 账号密码，根据account_type不同含义不同
+ * @param {number} [updateData.account_type] - 账号类型：0-账号密码登录，1-LinuxDo登录，2-GitHub登录，3-微信登录
+ * @param {string} [updateData.platform_type] - newapi平台类型：anyrouter、agentrouter、coderouter
+ * @param {string} [updateData.aff_code] - newapi账号的邀请码
  * @param {string} [updateData.session] - 会话标识
  * @param {number} [updateData.session_expire_time] - Session过期时间戳
- * @param {string} [updateData.account_id] - AnyRouter平台账号ID
+ * @param {string} [updateData.account_id] - newapi平台账号ID
+ * @param {Array<{id?: number, key?: string, unlimited_quota?: boolean, used_quota?: number, remain_quota?: number, is_deleted?: boolean, supplement_quota?: number}>} [updateData.tokens] - newapi账号的所有令牌信息。每个令牌包含：id(令牌ID，无id表示新令牌)、key(访问密钥)、unlimited_quota(是否无限额度)、used_quota(已使用额度)、remain_quota(剩余额度)、is_deleted(标记删除)、supplement_quota(补充额度数量)
  * @param {number} [updateData.checkin_date] - 签到时间戳
- * @param {number} [updateData.balance] - AnyRouter账号余额
- * @param {number} [updateData.agentrouter_balance] - AgentRouter账号余额
+ * @param {number} [updateData.balance] - 账号余额
+ * @param {number} [updateData.used] - 账号已使用的额度
  * @param {boolean} [updateData.is_sold] - 是否已售出
  * @param {number} [updateData.sell_date] - 出售时间戳
- * @param {number} [updateData.account_type] - 登录类型：0-账号密码登录，1-LinuxDo登录（username/password为LinuxDo账号），2-GitHub登录（username/password为GitHub账号）
  * @param {boolean} [updateData.can_sell] - 是否可出售
- * @param {string} [updateData.workflow_url] - 工作流URL
+ * @param {boolean} [updateData.is_banned] - 是否被封禁，被封禁的账号将无法使用
+ * @param {string} [updateData.workflow_url] - 签到工作流地址，owner@repo格式（如：laixingyu123@ay1）
  * @param {string} [updateData.notes] - 备注信息
  * @param {string} [updateData.cache_key] - 用户持久化时的辅助key
  * @param {number} [updateData.checkin_error_count] - 连续签到失败的次数统计
- * @param {number} [updateData.checkin_mode] - 签到模式：1-只签到anyrouter，2-只签到agentrouter，3-两者都签到
- * @param {Array<{id: number, key: string, unlimited_quota?: boolean, used_quota?: number, remain_quota?: number}>} [updateData.tokens] - AnyRouter账号的所有令牌信息。每个令牌包含：id(令牌ID)、key(访问密钥)、unlimited_quota(是否无限额度)、used_quota(已使用额度)、remain_quota(剩余额度)
- * @param {string} [updateData.aff_code] - 推广码（本地定义字段，API不支持）
- * @param {number} [updateData.used] - 已使用额度（本地定义字段，API不支持）
+ * @param {number} [updateData.checkin_mode] - 签到模式（废弃，固定1）
+ * @param {number} [updateData.event_flag] - 事件标记，0表示无事件或已完成，具体值由业务场景指定
+ * @param {Object} [updateData.event_backup] - 事件备份数据，用于回滚或记录变更历史。**注意**：此字段会与现有数据合并，而非覆盖。新字段会被添加，同名字段会被新值覆盖，旧的其他字段会保留
  * @returns {Promise<{success: boolean, data?: {updated: number, updatedFields: string[]}, error?: string}>}
  */
 export async function updateAccountInfo(_id, updateData) {
@@ -519,16 +572,23 @@ export async function updatePasswordChange(params) {
 
 /**
  * 获取用户的账号列表
- * @description 获取指定用户的所有账号列表，支持排序和用户名模糊搜索
+ * @description 获取指定用户的所有账号列表，支持排序、用户名模糊搜索、事件标记筛选和分页限制
  *
  * **功能特性**：
  * 1. 支持按出售时间或余额排序
  * 2. 支持用户名模糊搜索（大小写不敏感）
  * 3. 对于官方用户（official_user_001），自动过滤已售出的账号
- * 4. 自动分页获取所有符合条件的数据
+ * 4. 支持通过 scope='all_user' 获取所有用户的账号
+ * 5. 支持通过 event_flag 筛选不等于指定值的记录
+ * 6. 支持通过 pages 参数限制返回的数据量
+ * 7. 支持通过 account_type 筛选指定登录类型的账号
+ * 8. 支持通过 platform_type 筛选指定平台类型的账号
  *
  * @param {Object} params - 查询参数
- * @param {string} params.user_id - AnyRouter用户ID（关联anyrouter-users表的_id）
+ * @param {string} [params.user_id] - AnyRouter用户ID（关联anyrouter-users表的_id）。当 scope='all_user' 时可不传，当 scope 不为 'all_user' 且 user_id 为空时返回400错误
+ * @param {string} [params.scope] - 查询范围（可选）：
+ *   - 不传或其他值：按 user_id 筛选指定用户的账号
+ *   - 'all_user'：获取所有用户的账号（此时 user_id 可不传）
  * @param {string} [params.sort_field] - 排序字段（可选）：
  *   - sell_date: 按出售时间/获得时间排序
  *   - balance: 按AnyRouter余额排序
@@ -540,15 +600,35 @@ export async function updatePasswordChange(params) {
  *   - 大小写不敏感
  *   - 自动去除前后空格
  *   - 不传或为空时不进行搜索过滤
+ * @param {number} [params.event_flag] - 事件标记筛选（可选）
+ *   - 传入时筛选 event_flag **不等于**该值的记录
+ *   - 不传则不进行事件标记筛选
+ *   - 例如：传入 event_flag=1，则返回 event_flag != 1 的所有记录
+ * @param {number} [params.account_type] - 登录类型筛选（可选）
+ *   - 0: 账号密码登录
+ *   - 1: LinuxDo登录
+ *   - 2: GitHub登录
+ *   - 3: 微信登录
+ *   - 不传则不进行登录类型筛选
+ * @param {string} [params.platform_type] - 平台类型筛选（可选）
+ *   - anyrouter: AnyRouter平台
+ *   - agentrouter: AgentRouter平台
+ *   - coderouter: CodeRouter平台
+ *   - 不传则不进行平台类型筛选
+ * @param {number} [params.pages] - 获取页数（可选）
+ *   - 每页固定100条记录
+ *   - 传入 pages=2 则最多返回200条
+ *   - 不传则获取所有符合条件的数据
  * @returns {Promise<{success: boolean, data?: Array<{
  *   _id: string,
  *   username: string,
  *   password: string,
- *   account_type: 0|1|2,
+ *   account_type: 0|1|2|3,
+ *   platform_type: string,
  *   checkin_date: number|null,
  *   balance: number,
  *   tokens: Array<{id: number, key: string, unlimited_quota?: boolean, used_quota?: number, remain_quota?: number}>,
- *   checkin_mode: 1|2|3,
+ *   checkin_mode: number,
  *   sell_date: number|null,
  * 	 notes: string,
  * 	 create_date: number
@@ -556,6 +636,13 @@ export async function updatePasswordChange(params) {
  * @example
  * // 获取用户所有账号
  * const result = await getAccountList({ user_id: 'user_001' });
+ * if (result.success) {
+ *   console.log(`找到 ${result.data.length} 个账号`);
+ * }
+ *
+ * @example
+ * // 获取所有用户的账号
+ * const result = await getAccountList({ scope: 'all_user' });
  * if (result.success) {
  *   console.log(`找到 ${result.data.length} 个账号`);
  * }
@@ -569,20 +656,60 @@ export async function updatePasswordChange(params) {
  * });
  *
  * @example
- * // 搜索包含"test"的账号
+ * // 搜索包含"test"的账号，且 event_flag != 1
  * const result = await getAccountList({
  *   user_id: 'user_001',
- *   username_keyword: 'test'
+ *   username_keyword: 'test',
+ *   event_flag: 1
+ * });
+ *
+ * @example
+ * // 筛选 LinuxDo 登录类型的账号
+ * const result = await getAccountList({
+ *   user_id: 'user_001',
+ *   account_type: 1
+ * });
+ *
+ * @example
+ * // 筛选 AnyRouter 平台的账号
+ * const result = await getAccountList({
+ *   user_id: 'user_001',
+ *   platform_type: 'anyrouter'
+ * });
+ *
+ * @example
+ * // 限制返回200条数据（2页）
+ * const result = await getAccountList({
+ *   user_id: 'user_001',
+ *   pages: 2
  * });
  */
 export async function getAccountList(params) {
-	const { user_id, sort_field, sort_order, username_keyword } = params;
+	const {
+		user_id,
+		scope,
+		sort_field,
+		sort_order,
+		username_keyword,
+		event_flag,
+		account_type,
+		platform_type,
+		pages,
+	} = params;
 
-	// 验证必需字段
-	if (!user_id) {
+	// 验证必需字段：当 scope 不为 'all_user' 时，user_id 必填
+	if (scope !== 'all_user' && !user_id) {
 		return {
 			success: false,
-			error: '用户ID不能为空',
+			error: '用户ID不能为空（除非 scope 为 all_user）',
+		};
+	}
+
+	// 验证 scope 值（如果提供）
+	if (scope !== undefined && scope !== 'all_user') {
+		return {
+			success: false,
+			error: 'scope 值只能为 all_user',
 		};
 	}
 
@@ -602,8 +729,51 @@ export async function getAccountList(params) {
 		};
 	}
 
+	// 验证 event_flag 必须为整数（如果提供）
+	if (event_flag !== undefined && !Number.isInteger(event_flag)) {
+		return {
+			success: false,
+			error: 'event_flag 必须为整数',
+		};
+	}
+
+	// 验证 account_type 必须为有效值（如果提供）
+	if (account_type !== undefined && ![0, 1, 2, 3].includes(account_type)) {
+		return {
+			success: false,
+			error: 'account_type 必须为 0、1、2 或 3',
+		};
+	}
+
+	// 验证 platform_type 必须为有效值（如果提供）
+	if (
+		platform_type !== undefined &&
+		!['anyrouter', 'agentrouter', 'coderouter'].includes(platform_type)
+	) {
+		return {
+			success: false,
+			error: 'platform_type 必须为 anyrouter、agentrouter 或 coderouter',
+		};
+	}
+
+	// 验证 pages 必须为正整数（如果提供）
+	if (pages !== undefined && (!Number.isInteger(pages) || pages < 1)) {
+		return {
+			success: false,
+			error: 'pages 必须为正整数',
+		};
+	}
+
 	// 构建请求数据
-	const requestData = { user_id };
+	const requestData = {};
+
+	if (user_id !== undefined) {
+		requestData.user_id = user_id;
+	}
+
+	if (scope !== undefined) {
+		requestData.scope = scope;
+	}
 
 	if (sort_field !== undefined) {
 		requestData.sort_field = sort_field;
@@ -615,6 +785,22 @@ export async function getAccountList(params) {
 
 	if (username_keyword !== undefined && username_keyword.trim() !== '') {
 		requestData.username_keyword = username_keyword.trim();
+	}
+
+	if (event_flag !== undefined) {
+		requestData.event_flag = event_flag;
+	}
+
+	if (account_type !== undefined) {
+		requestData.account_type = account_type;
+	}
+
+	if (platform_type !== undefined) {
+		requestData.platform_type = platform_type;
+	}
+
+	if (pages !== undefined) {
+		requestData.pages = pages;
 	}
 
 	return handleApiResponse(apiClient.post('/lyanyrouter/getAccountList', requestData));

@@ -21,3 +21,4 @@ export { getTopPriorityTask, updateInviteCount } from './invite-task.js';
 export { uploadImage } from './upload.js';
 export { addEmail, getLatestEmail, queryEmails } from './email.js';
 export { addKey, addKeys, updateKeyInfo } from './ai-key.js';
+export { addEmailAccount, updateEmailAccount } from './email-account.js';
